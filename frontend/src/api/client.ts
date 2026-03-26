@@ -107,13 +107,26 @@ export async function getSessionInfo(sid: string): Promise<SessionInfoResponse> 
 }
 
 export async function aiEdit(sid: string, prompt: string): Promise<SizeResponse> {
-  const res = await fetch(`${BASE}/api/ai-edit`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sid, prompt }),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  const controller = new AbortController();
+  // Backend allows up to 120s × 3 retries + 30s overhead = 390s; add client grace
+  const timeoutId = setTimeout(() => controller.abort(), 420_000); // 7 min client-side timeout
+  try {
+    const res = await fetch(`${BASE}/api/ai-edit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sid, prompt }),
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('AI edit timed out — the request took too long. Please try again.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export async function upscaleImage(sid: string, scale: 2 | 4): Promise<SizeResponse> {

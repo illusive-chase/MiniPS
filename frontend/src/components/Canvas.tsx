@@ -257,6 +257,8 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
   // Space key tracking for pan
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept Space when user is typing in an input or textarea
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.code === 'Space' && !e.repeat) {
         e.preventDefault();
         spaceDownRef.current = true;
