@@ -106,6 +106,26 @@ export async function getSessionInfo(sid: string): Promise<SessionInfoResponse> 
   return res.json();
 }
 
+export async function aiEdit(sid: string, prompt: string): Promise<SizeResponse> {
+  const res = await fetch(`${BASE}/api/ai-edit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sid, prompt }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function upscaleImage(sid: string, scale: 2 | 4): Promise<SizeResponse> {
+  const res = await fetch(`${BASE}/api/upscale`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sid, scale }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 export function getExportUrl(sid: string, format: 'png' | 'jpeg' = 'png'): string {
   return `${BASE}/api/export/${sid}?format=${format}`;
 }

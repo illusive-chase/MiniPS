@@ -66,10 +66,27 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
   const panStartRef = useRef({ x: 0, y: 0 });
   const panOriginRef = useRef({ x: 0, y: 0 });
   const spaceDownRef = useRef(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const [spaceDown, setSpaceDown] = useState(false);
 
   // Drag rectangle state (shared by crop and eraser tools)
   const [dragRect, setDragRect] = useState<DragRect | null>(null);
   const isDraggingRef = useRef(false);
+
+  // Stable refs for props/callbacks so effects & listeners don't cascade
+  const onZoomChangeRef = useRef(onZoomChange);
+  onZoomChangeRef.current = onZoomChange;
+  const toolRef = useRef(tool);
+  toolRef.current = tool;
+  const onCropSelectRef = useRef(onCropSelect);
+  onCropSelectRef.current = onCropSelect;
+  const onEraserSelectRef = useRef(onEraserSelect);
+  onEraserSelectRef.current = onEraserSelect;
+  const dragRectRef = useRef(dragRect);
+  dragRectRef.current = dragRect;
+
+  // Track which sessionId we last loaded to avoid zoom reset on re-renders
+  const loadedSessionRef = useRef<string | null>(null);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -117,12 +134,15 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
     // Draw the image
     ctx.drawImage(img, drawX, drawY, imgW, imgH);
 
+    const currentTool = toolRef.current;
+    const currentDragRect = dragRectRef.current;
+
     // Draw crop overlay if active
-    if (dragRect && tool === 'crop') {
-      const rx = Math.min(dragRect.startX, dragRect.endX);
-      const ry = Math.min(dragRect.startY, dragRect.endY);
-      const rw = Math.abs(dragRect.endX - dragRect.startX);
-      const rh = Math.abs(dragRect.endY - dragRect.startY);
+    if (currentDragRect && currentTool === 'crop') {
+      const rx = Math.min(currentDragRect.startX, currentDragRect.endX);
+      const ry = Math.min(currentDragRect.startY, currentDragRect.endY);
+      const rw = Math.abs(currentDragRect.endX - currentDragRect.startX);
+      const rh = Math.abs(currentDragRect.endY - currentDragRect.startY);
 
       // Dim the area outside the crop
       ctx.save();
@@ -147,11 +167,11 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
     }
 
     // Draw eraser overlay if active
-    if (dragRect && tool === 'eraser') {
-      const rx = Math.min(dragRect.startX, dragRect.endX);
-      const ry = Math.min(dragRect.startY, dragRect.endY);
-      const rw = Math.abs(dragRect.endX - dragRect.startX);
-      const rh = Math.abs(dragRect.endY - dragRect.startY);
+    if (currentDragRect && currentTool === 'eraser') {
+      const rx = Math.min(currentDragRect.startX, currentDragRect.endX);
+      const ry = Math.min(currentDragRect.startY, currentDragRect.endY);
+      const rw = Math.abs(currentDragRect.endX - currentDragRect.startX);
+      const rh = Math.abs(currentDragRect.endY - currentDragRect.startY);
 
       ctx.save();
       ctx.strokeStyle = '#ffffff';
@@ -164,15 +184,18 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
       ctx.fillRect(rx, ry, rw, rh);
       ctx.restore();
     }
-  }, [dragRect, tool]);
+  }, []); // No deps — reads everything from refs
 
   const requestDraw = useCallback(() => {
     cancelAnimationFrame(animFrameRef.current);
     animFrameRef.current = requestAnimationFrame(draw);
-  }, [draw]);
+  }, [draw]); // draw is now stable, so requestDraw is stable too
 
-  // Load image when sessionId changes
-  const loadImage = useCallback(() => {
+  // Load image only when sessionId actually changes
+  useEffect(() => {
+    if (sessionId === loadedSessionRef.current) return;
+    loadedSessionRef.current = sessionId;
+
     if (!sessionId) {
       imageRef.current = null;
       requestDraw();
@@ -184,7 +207,7 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
     img.onload = () => {
       imageRef.current = img;
 
-      // Auto-fit zoom if this is a new image
+      // Auto-fit zoom for the new image
       const canvas = canvasRef.current;
       if (canvas) {
         const rect = canvas.getBoundingClientRect();
@@ -196,19 +219,15 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
         zoomRef.current = fitZoom;
         panRef.current = { x: 0, y: 0 };
         setZoom(fitZoom);
-        onZoomChange?.(fitZoom);
+        onZoomChangeRef.current?.(fitZoom);
       }
 
       requestDraw();
     };
     img.src = getImageUrl(sessionId);
-  }, [sessionId, requestDraw, onZoomChange]);
+  }, [sessionId, requestDraw]);
 
-  useEffect(() => {
-    loadImage();
-  }, [loadImage]);
-
-  // Expose refreshImage
+  // Expose refreshImage — reloads image data without touching zoom/pan
   useImperativeHandle(
     ref,
     () => ({
@@ -241,11 +260,13 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
       if (e.code === 'Space' && !e.repeat) {
         e.preventDefault();
         spaceDownRef.current = true;
+        setSpaceDown(true);
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
         spaceDownRef.current = false;
+        setSpaceDown(false);
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -276,55 +297,10 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
     };
   }, []);
 
-  // Mouse handlers
-  const handleWheel = useCallback(
-    (e: React.WheelEvent) => {
-      e.preventDefault();
-      const delta = e.deltaY > 0 ? 0.9 : 1.1;
-      const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoomRef.current * delta));
-      zoomRef.current = newZoom;
-      setZoom(newZoom);
-      onZoomChange?.(newZoom);
-      requestDraw();
-    },
-    [requestDraw, onZoomChange]
-  );
+  // ── Document-level drag handlers (attached on mousedown, removed on mouseup) ──
 
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      // Middle mouse button or space+left click = pan
-      if (e.button === 1 || (e.button === 0 && spaceDownRef.current)) {
-        e.preventDefault();
-        isPanningRef.current = true;
-        panStartRef.current = { x: e.clientX, y: e.clientY };
-        panOriginRef.current = { ...panRef.current };
-        return;
-      }
-
-      // Left click with crop or eraser tool = start drag rectangle
-      if (e.button === 0 && (tool === 'crop' || tool === 'eraser') && sessionId) {
-        isDraggingRef.current = true;
-        const rect = canvas.getBoundingClientRect();
-        const sx = e.clientX - rect.left;
-        const sy = e.clientY - rect.top;
-        setDragRect({ startX: sx, startY: sy, endX: sx, endY: sy });
-        return;
-      }
-
-      // Left click with wand tool = single click action
-      if (e.button === 0 && tool === 'wand' && sessionId && onWandClick) {
-        const imgCoords = screenToImage(e.clientX, e.clientY);
-        onWandClick(Math.round(imgCoords.x), Math.round(imgCoords.y));
-      }
-    },
-    [tool, sessionId, onWandClick, screenToImage]
-  );
-
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent) => {
+  const onDocMouseMove = useCallback(
+    (e: MouseEvent) => {
       if (isPanningRef.current) {
         panRef.current = {
           x: panOriginRef.current.x + (e.clientX - panStartRef.current.x),
@@ -347,61 +323,148 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
     [requestDraw]
   );
 
-  const handleMouseUp = useCallback(
-    () => {
+  const onDocMouseUp = useCallback(
+    (_e: MouseEvent) => {
+      // Always clean up document listeners
+      document.removeEventListener('mousemove', onDocMouseMove);
+      document.removeEventListener('mouseup', onDocMouseUp);
+
       if (isPanningRef.current) {
         isPanningRef.current = false;
+        setIsPanning(false);
         return;
       }
 
-      if (isDraggingRef.current && dragRect) {
+      if (isDraggingRef.current) {
         isDraggingRef.current = false;
-        // Convert screen coordinates to image coordinates
-        const p1 = screenToImage(
-          dragRect.startX + canvasRef.current!.getBoundingClientRect().left,
-          dragRect.startY + canvasRef.current!.getBoundingClientRect().top
-        );
-        const p2 = screenToImage(
-          dragRect.endX + canvasRef.current!.getBoundingClientRect().left,
-          dragRect.endY + canvasRef.current!.getBoundingClientRect().top
-        );
-        const x = Math.min(p1.x, p2.x);
-        const y = Math.min(p1.y, p2.y);
-        const w = Math.abs(p2.x - p1.x);
-        const h = Math.abs(p2.y - p1.y);
+        const dr = dragRectRef.current;
+        if (dr) {
+          const canvasRect = canvasRef.current?.getBoundingClientRect();
+          if (canvasRect) {
+            const p1 = screenToImage(
+              dr.startX + canvasRect.left,
+              dr.startY + canvasRect.top
+            );
+            const p2 = screenToImage(
+              dr.endX + canvasRect.left,
+              dr.endY + canvasRect.top
+            );
+            const x = Math.min(p1.x, p2.x);
+            const y = Math.min(p1.y, p2.y);
+            const w = Math.abs(p2.x - p1.x);
+            const h = Math.abs(p2.y - p1.y);
 
-        if (w > 1 && h > 1) {
-          if (tool === 'crop' && onCropSelect) {
-            onCropSelect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
-          } else if (tool === 'eraser' && onEraserSelect) {
-            onEraserSelect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+            if (w > 1 && h > 1) {
+              const currentTool = toolRef.current;
+              if (currentTool === 'crop' && onCropSelectRef.current) {
+                onCropSelectRef.current(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+              } else if (currentTool === 'eraser' && onEraserSelectRef.current) {
+                onEraserSelectRef.current(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+              }
+            }
           }
+          setDragRect(null);
+          requestDraw();
         }
-        setDragRect(null);
-        requestDraw();
-      } else {
-        isDraggingRef.current = false;
       }
     },
-    [dragRect, tool, onCropSelect, onEraserSelect, screenToImage, requestDraw]
+    [onDocMouseMove, screenToImage, requestDraw]
   );
 
-  // Prevent default on middle click
-  const handleAuxClick = useCallback((e: React.MouseEvent) => {
-    if (e.button === 1) e.preventDefault();
-  }, []);
+  // ── Canvas mousedown — starts drag and attaches document listeners ──
+
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      // Right-click, space+left-click, or left-click with no tool = pan
+      if (
+        e.button === 2 ||
+        (e.button === 0 && spaceDownRef.current) ||
+        (e.button === 0 && tool === 'none')
+      ) {
+        e.preventDefault();
+        isPanningRef.current = true;
+        setIsPanning(true);
+        panStartRef.current = { x: e.clientX, y: e.clientY };
+        panOriginRef.current = { ...panRef.current };
+        document.addEventListener('mousemove', onDocMouseMove);
+        document.addEventListener('mouseup', onDocMouseUp);
+        return;
+      }
+
+      // Left click with crop or eraser tool = start drag rectangle
+      if (e.button === 0 && (tool === 'crop' || tool === 'eraser') && sessionId) {
+        isDraggingRef.current = true;
+        const rect = canvas.getBoundingClientRect();
+        const sx = e.clientX - rect.left;
+        const sy = e.clientY - rect.top;
+        setDragRect({ startX: sx, startY: sy, endX: sx, endY: sy });
+        document.addEventListener('mousemove', onDocMouseMove);
+        document.addEventListener('mouseup', onDocMouseUp);
+        return;
+      }
+
+      // Left click with wand tool = single click action
+      if (e.button === 0 && tool === 'wand' && sessionId && onWandClick) {
+        const imgCoords = screenToImage(e.clientX, e.clientY);
+        onWandClick(Math.round(imgCoords.x), Math.round(imgCoords.y));
+      }
+    },
+    [tool, sessionId, onWandClick, screenToImage, onDocMouseMove, onDocMouseUp]
+  );
+
+  // Zoom-to-cursor
+  const handleWheel = useCallback(
+    (e: React.WheelEvent) => {
+      e.preventDefault();
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const oldZoom = zoomRef.current;
+      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+      const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, oldZoom * delta));
+      const scale = newZoom / oldZoom;
+
+      // Adjust pan so the point under the cursor stays fixed
+      const pan = panRef.current;
+      const cxOff = mouseX - rect.width / 2;
+      const cyOff = mouseY - rect.height / 2;
+      panRef.current = {
+        x: cxOff - scale * (cxOff - pan.x),
+        y: cyOff - scale * (cyOff - pan.y),
+      };
+
+      zoomRef.current = newZoom;
+      setZoom(newZoom);
+      onZoomChangeRef.current?.(newZoom);
+      requestDraw();
+    },
+    [requestDraw]
+  );
+
+  // Compute cursor based on state
+  const getCursor = (): string => {
+    if (isPanning) return 'grabbing';
+    if (spaceDown) return 'grab';
+    if (tool === 'crop' || tool === 'wand' || tool === 'eraser') return 'crosshair';
+    if (tool === 'none' && sessionId) return 'grab';
+    return 'default';
+  };
 
   return (
     <div ref={containerRef} className="flex-1 relative overflow-hidden bg-[#1a1a1a]">
       <canvas
         ref={canvasRef}
         className="absolute inset-0 w-full h-full"
-        style={{ cursor: spaceDownRef.current || isPanningRef.current ? 'grabbing' : (tool === 'crop' || tool === 'wand' || tool === 'eraser') ? 'crosshair' : 'default' }}
+        style={{ cursor: getCursor() }}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onAuxClick={handleAuxClick}
         onContextMenu={(e) => e.preventDefault()}
       />
     </div>

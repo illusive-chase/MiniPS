@@ -4,6 +4,8 @@ import type { CanvasHandle, ToolMode } from './components/Canvas';
 import ResizePanel from './components/ResizePanel';
 import WandPanel from './components/WandPanel';
 import FillPanel from './components/FillPanel';
+import AiEditPanel from './components/AiEditPanel';
+import UpscalePanel from './components/UpscalePanel';
 import {
   openImage,
   getExportUrl,
@@ -15,6 +17,8 @@ import {
   magicWand,
   rectErase,
   alphaRepaint,
+  aiEdit,
+  upscaleImage,
 } from './api/client';
 
 const TOOLS: { id: ToolMode; label: string }[] = [
@@ -36,6 +40,10 @@ function App() {
   const [wandTolerance, setWandTolerance] = useState(32);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [aiEditLoading, setAiEditLoading] = useState(false);
+  const [aiEditError, setAiEditError] = useState<string | null>(null);
+  const [upscaleLoading, setUpscaleLoading] = useState(false);
+  const [upscaleError, setUpscaleError] = useState<string | null>(null);
 
   const canvasRef = useRef<CanvasHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -185,8 +193,66 @@ function App() {
     setActiveTool('none');
   }, []);
 
+  const handleAiEditApply = useCallback(
+    async (prompt: string) => {
+      if (!sessionId) return;
+      setAiEditLoading(true);
+      setAiEditError(null);
+      try {
+        const size = await aiEdit(sessionId, prompt);
+        setImageSize({ width: size.width, height: size.height });
+        canvasRef.current?.refreshImage();
+        await refreshSessionInfo(sessionId);
+        setActiveTool('none');
+        setAiEditError(null);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'AI edit failed';
+        setAiEditError(msg);
+        console.error('AI edit failed:', err);
+      } finally {
+        setAiEditLoading(false);
+      }
+    },
+    [sessionId, refreshSessionInfo]
+  );
+
+  const handleAiEditCancel = useCallback(() => {
+    setActiveTool('none');
+    setAiEditError(null);
+  }, []);
+
+  const handleUpscaleApply = useCallback(
+    async (scale: 2 | 4) => {
+      if (!sessionId) return;
+      setUpscaleLoading(true);
+      setUpscaleError(null);
+      try {
+        const size = await upscaleImage(sessionId, scale);
+        setImageSize({ width: size.width, height: size.height });
+        canvasRef.current?.refreshImage();
+        await refreshSessionInfo(sessionId);
+        setActiveTool('none');
+        setUpscaleError(null);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Upscale failed';
+        setUpscaleError(msg);
+        console.error('Upscale failed:', err);
+      } finally {
+        setUpscaleLoading(false);
+      }
+    },
+    [sessionId, refreshSessionInfo]
+  );
+
+  const handleUpscaleCancel = useCallback(() => {
+    setActiveTool('none');
+    setUpscaleError(null);
+  }, []);
+
   const handleToolClick = useCallback((toolId: ToolMode) => {
     setActiveTool((prev) => (prev === toolId ? 'none' : toolId));
+    setAiEditError(null);
+    setUpscaleError(null);
   }, []);
 
   const handleResizeApply = useCallback(
@@ -242,38 +308,38 @@ function App() {
       />
 
       {/* Top bar */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-gray-800 border-b border-gray-700 shrink-0">
+      <div className="flex items-center gap-3 px-4 py-3 bg-gray-800 border-b border-gray-700 shrink-0">
         <button
           onClick={handleOpen}
           disabled={loading}
-          className="px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-50 transition-colors"
+          className="px-5 py-2.5 text-base rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-50 transition-colors"
         >
           Open
         </button>
         <button
           onClick={handleSave}
           disabled={!sessionId || loading}
-          className="px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-50 transition-colors"
+          className="px-5 py-2.5 text-base rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-50 transition-colors"
         >
           Save
         </button>
-        <div className="w-px h-6 bg-gray-600 mx-1" />
+        <div className="w-px h-8 bg-gray-600 mx-1" />
         <button
           onClick={handleUndo}
           disabled={!sessionId || loading || !canUndo}
-          className="px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-50 transition-colors"
+          className="px-5 py-2.5 text-base rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-50 transition-colors"
         >
           Undo
         </button>
         <button
           onClick={handleRedo}
           disabled={!sessionId || loading || !canRedo}
-          className="px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-50 transition-colors"
+          className="px-5 py-2.5 text-base rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-50 transition-colors"
         >
           Redo
         </button>
         <div className="flex-1" />
-        <span className="text-xs text-gray-400 tabular-nums">
+        <span className="text-sm text-gray-400 tabular-nums">
           {Math.round(zoom * 100)}%
         </span>
       </div>
@@ -309,16 +375,36 @@ function App() {
         {activeTool === 'fill' && (
           <FillPanel onApply={handleFillApply} onCancel={handleFillCancel} />
         )}
+
+        {/* AI Edit panel */}
+        {activeTool === 'ai-edit' && (
+          <AiEditPanel
+            onApply={handleAiEditApply}
+            onCancel={handleAiEditCancel}
+            loading={aiEditLoading}
+            error={aiEditError}
+          />
+        )}
+
+        {/* Upscale panel */}
+        {activeTool === 'upscale' && (
+          <UpscalePanel
+            onApply={handleUpscaleApply}
+            onCancel={handleUpscaleCancel}
+            loading={upscaleLoading}
+            error={upscaleError}
+          />
+        )}
       </div>
 
       {/* Bottom tool bar */}
-      <div className="flex items-center gap-1.5 px-3 py-2 bg-gray-800 border-t border-gray-700 shrink-0 flex-wrap">
+      <div className="flex items-center gap-2.5 px-4 py-3 bg-gray-800 border-t border-gray-700 shrink-0 flex-wrap">
         {TOOLS.map(({ id, label }) => (
           <button
             key={id}
             onClick={() => handleToolClick(id)}
             disabled={!sessionId}
-            className={`px-3 py-1.5 text-sm rounded transition-colors disabled:opacity-50 ${
+            className={`px-5 py-2.5 text-base rounded-lg transition-colors disabled:opacity-50 ${
               activeTool === id
                 ? 'bg-blue-600 text-white'
                 : 'bg-gray-700 hover:bg-gray-600 text-gray-200'

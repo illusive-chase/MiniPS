@@ -53,16 +53,16 @@ export default function ResizePanel({
   }, [width, height, onApply]);
 
   return (
-    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 bg-gray-800 border border-gray-600 rounded-lg shadow-lg px-4 py-3 flex items-center gap-3">
+    <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-20 bg-gray-800 border border-gray-600 rounded-xl shadow-lg px-5 py-4 flex items-center gap-4">
       {/* Width */}
-      <label className="flex items-center gap-1.5 text-sm text-gray-300">
+      <label className="flex items-center gap-2 text-base text-gray-300">
         W
         <input
           type="number"
           min={1}
           value={width}
           onChange={(e) => handleWidthChange(Number(e.target.value))}
-          className="w-20 px-2 py-1 text-sm rounded bg-gray-700 border border-gray-600 text-gray-200 focus:outline-none focus:border-blue-500"
+          className="w-24 px-3 py-2 text-base rounded-lg bg-gray-700 border border-gray-600 text-gray-200 focus:outline-none focus:border-blue-500"
         />
       </label>
 
@@ -70,7 +70,7 @@ export default function ResizePanel({
       <button
         onClick={() => setLockAspect((prev) => !prev)}
         title={lockAspect ? 'Unlock aspect ratio' : 'Lock aspect ratio'}
-        className={`px-2 py-1 text-sm rounded transition-colors ${
+        className={`px-3 py-2 text-base rounded-lg transition-colors ${
           lockAspect
             ? 'bg-blue-600 text-white'
             : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
@@ -81,7 +81,7 @@ export default function ResizePanel({
             xmlns="http://www.w3.org/2000/svg"
             viewBox="0 0 20 20"
             fill="currentColor"
-            className="w-4 h-4"
+            className="w-5 h-5"
           >
             <path
               fillRule="evenodd"
@@ -94,7 +94,7 @@ export default function ResizePanel({
             xmlns="http://www.w3.org/2000/svg"
             viewBox="0 0 20 20"
             fill="currentColor"
-            className="w-4 h-4"
+            className="w-5 h-5"
           >
             <path d="M14.5 1A4.5 4.5 0 0010 5.5V9H5a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2h-1.5V5.5a3 3 0 116 0v2.75a.75.75 0 001.5 0V5.5A4.5 4.5 0 0014.5 1z" />
           </svg>
@@ -102,24 +102,24 @@ export default function ResizePanel({
       </button>
 
       {/* Height */}
-      <label className="flex items-center gap-1.5 text-sm text-gray-300">
+      <label className="flex items-center gap-2 text-base text-gray-300">
         H
         <input
           type="number"
           min={1}
           value={height}
           onChange={(e) => handleHeightChange(Number(e.target.value))}
-          className="w-20 px-2 py-1 text-sm rounded bg-gray-700 border border-gray-600 text-gray-200 focus:outline-none focus:border-blue-500"
+          className="w-24 px-3 py-2 text-base rounded-lg bg-gray-700 border border-gray-600 text-gray-200 focus:outline-none focus:border-blue-500"
         />
       </label>
 
       {/* Divider */}
-      <div className="w-px h-6 bg-gray-600" />
+      <div className="w-px h-8 bg-gray-600" />
 
       {/* Apply */}
       <button
         onClick={handleApply}
-        className="px-3 py-1 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+        className="px-5 py-2 text-base rounded-lg bg-blue-600 hover:bg-blue-500 text-white transition-colors"
       >
         Apply
       </button>
@@ -127,7 +127,7 @@ export default function ResizePanel({
       {/* Cancel */}
       <button
         onClick={onCancel}
-        className="px-3 py-1 text-sm rounded bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors"
+        className="px-5 py-2 text-base rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors"
       >
         Cancel
       </button>
